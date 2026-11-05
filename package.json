@@ -1,0 +1,35 @@
+{
+  "name": "btc-prediction-trader-next",
+  "version": "0.2.0",
+  "private": true,
+  "description": "币安预测盘 BTC 15 分钟涨跌 · B0 跟盘策略 · 自动交易机器人",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "volta": {
+    "node": "24.19.0",
+    "pnpm": "9.13.0"
+  },
+  "scripts": {
+    "live": "node --import tsx src/cli/run.ts",
+    "board": "node --import tsx src/cli/board.ts",
+    "account": "node --import tsx src/cli/account.ts",
+    "doctor": "node --import tsx src/cli/doctor.ts",
+    "status": "node --import tsx src/cli/status.ts",
+    "trade": "node --import tsx src/cli/trade.ts",
+    "pause": "node --import tsx src/cli/pause.ts",
+    "resume": "node --import tsx src/cli/resume.ts",
+    "test": "node --import tsx --test src/strategy/money.test.ts src/strategy/depthStake.test.ts src/strategy/b0.test.ts src/market/result.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "bignumber.js": "^11.1.5"
+  }
+}

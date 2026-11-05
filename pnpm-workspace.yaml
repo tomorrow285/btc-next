@@ -1,0 +1,10 @@
+# pnpm 11 起，pnpm 专有设置从 package.json / .npmrc 迁到这里。
+# pnpm 9 仍会读取 .npmrc 里的 use-node-version，两处都保留以兼容不同环境。
+packages:
+  - "."
+
+useNodeVersion: 24.19.0
+
+# 构建脚本白名单：tsx 依赖 esbuild，需要放行其构建脚本。
+allowBuilds:
+  esbuild: true
