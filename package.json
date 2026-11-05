@@ -20,6 +20,7 @@
     "trade": "node --import tsx src/cli/trade.ts",
     "pause": "node --import tsx src/cli/pause.ts",
     "resume": "node --import tsx src/cli/resume.ts",
+    "notice": "node --import tsx src/cli/notice.ts",
     "test": "node --import tsx --test src/strategy/money.test.ts src/strategy/depthStake.test.ts src/strategy/b0.test.ts src/market/result.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc"

@@ -11,6 +11,7 @@ import {
   type MartingaleSettings,
 } from "../strategy/money.js";
 import { logEvent } from "../util/log.js";
+import { notify } from "./notify.js";
 import { readState, writeState, type EngineState } from "./stateStore.js";
 
 /** B0 的马丁格尔参数（费率是市场级参数，单独拼进来）。 */
@@ -39,5 +40,21 @@ export function applyResetIfNeeded(state: EngineState = readState()): EngineStat
     realizedPnl: state.realizedPnl,
     resets: next.resets,
   });
+
+  // 重新初始化是风控事件，和 btc-trade 一样立即推，不等汇总。
+  notify(
+    `🔄 重新初始化（账本清零）\n` +
+      `原因：${reason}\n` +
+      `清零前：TOTAL_LOSS ${state.bankroll.totalLoss}u / 连败 ${state.bankroll.lossStreak}\n` +
+      `累计已实现盈亏：${state.realizedPnl}u（未清零）\n` +
+      `累计重置次数：${next.resets}`,
+    {
+      scope: "reset",
+      totalLossBefore: state.bankroll.totalLoss,
+      lossStreakBefore: state.bankroll.lossStreak,
+      resets: next.resets,
+    },
+    { key: `reset:${next.resets}` },
+  );
   return next;
 }

@@ -116,6 +116,27 @@ assertPositive("B0_RESET_LOSS_STREAK", bResetLossStreak);
 const bResetLossMultiple = readNumber("B0_RESET_LOSS_MULTIPLE", 128);
 assertPositive("B0_RESET_LOSS_MULTIPLE", bResetLossMultiple);
 
+// ---------- 飞书通知 ----------
+// 三项凭据要么全填、要么全不填：只填一半通常是复制 .env 时漏了，静默不通知比报错更难查。
+const feishuAppId = readRequiredString("FEISHU_APP_ID");
+const feishuAppSecret = readRequiredString("FEISHU_APP_SECRET");
+const feishuReceiveId = readRequiredString("FEISHU_RECEIVE_ID");
+const feishuCredentialCount = [feishuAppId, feishuAppSecret, feishuReceiveId].filter(Boolean).length;
+if (feishuCredentialCount > 0 && feishuCredentialCount < 3) {
+  throw new Error(
+    "飞书通知凭据不完整：FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_RECEIVE_ID 必须同时填写",
+  );
+}
+
+const feishuEnabledRaw = readString("FEISHU_NOTIFY_ENABLED", "true");
+if (feishuEnabledRaw !== "true" && feishuEnabledRaw !== "false") {
+  throw new Error(`FEISHU_NOTIFY_ENABLED 只能是 true / false，当前值：${feishuEnabledRaw}`);
+}
+const feishuRetries = readInteger("FEISHU_RETRIES", 3);
+assertPositive("FEISHU_RETRIES", feishuRetries);
+const feishuDedupeMs = readInteger("FEISHU_DEDUPE_MS", 1_800_000);
+assertNonNegative("FEISHU_DEDUPE_MS", feishuDedupeMs);
+
 const slippageBps = readInteger("SLIPPAGE_BPS", 200);
 assertRange("SLIPPAGE_BPS", slippageBps, 1, 10_000);
 
@@ -212,6 +233,23 @@ export const config = {
       resetLossStreak: bResetLossStreak,
       resetLossMultiple: bResetLossMultiple,
     },
+  },
+
+  feishu: {
+    /** 凭据齐全且没被显式关掉才启用；未启用时 notify() 直接返回，不报错。 */
+    enabled: feishuEnabledRaw === "true" && feishuCredentialCount === 3,
+    /** 飞书开放平台根地址；Lark 国际版换成 https://open.larksuite.com/open-apis。 */
+    apiBase: stripTrailingSlash(readString("FEISHU_API_BASE", "https://open.feishu.cn/open-apis")),
+    appId: feishuAppId,
+    appSecret: feishuAppSecret,
+    receiveId: feishuReceiveId,
+    /** chat_id（群）/ open_id / user_id / email，见飞书 im/v1/messages。 */
+    receiveIdType: readString("FEISHU_RECEIVE_ID_TYPE", "chat_id"),
+    timeoutMs: readInteger("FEISHU_TIMEOUT_MS", 10_000),
+    /** 单条消息的发送尝试次数（含首次）。 */
+    retries: feishuRetries,
+    /** 同一去重键的冷却时间；防止每个窗口重复刷同一类跳过原因。 */
+    dedupeMs: feishuDedupeMs,
   },
 
   dataDir: resolveDataDir(readString("DATA_DIR", "data")),

@@ -9,6 +9,7 @@ import {
   matchesWindowRecord,
   verifyFill,
 } from "./roundSupport.js";
+import { notify } from "./notify.js";
 import { writeState, type EngineState } from "./stateStore.js";
 import { submitOrder, type OrderAttempt } from "./trading.js";
 import {
@@ -62,6 +63,14 @@ export async function placeBet(
     record.skipCode = "ORDER_FAILED";
     record.error = message;
 
+    // 钱没花出去但下单路径炸了：属于必须人工知道的事件，立即推。
+    notify(
+      `❌ 下单失败（不重试）\n` +
+        `窗口：${tradeId}\n方向：${side}  注额：${amountUsdt}u\n原因：${message}`,
+      { tradeId, side, amountUsdt, reason: message },
+      { key: `order:failed:${tradeId}` },
+    );
+
     if (recordPersisted) {
       currentState = { ...currentState, lastError: message };
       writeState(currentState);
@@ -95,6 +104,13 @@ export async function placeBet(
     record.error = order.error;
     currentState = { ...currentState, lastError: order.error };
 
+    notify(
+      `❌ 下单未成交（不重试）\n` +
+        `窗口：${tradeId}\n方向：${side}  注额：${amountUsdt}u\n原因：${order.error ?? "下单失败"}`,
+      { tradeId, orderId: record.orderId, side, amountUsdt, reason: order.error ?? "" },
+      { key: `order:failed:${tradeId}` },
+    );
+
     if (recordPersisted) {
       writeState(currentState);
       updateTrade(matchesWindowRecord(record), {
@@ -122,6 +138,17 @@ export async function placeBet(
       window,
       "ORDER_FAILED",
       order.error ?? "下单失败",
+    );
+  }
+
+  // 超时未确认 ≠ 没成交。这笔钱可能已经花了，必须让人知道要去核对。
+  if (order.status === "UNKNOWN") {
+    notify(
+      `⚠️ 下单结果未确认，按「可能已成交」处理（不重试）\n` +
+        `窗口：${tradeId}\n订单：${record.orderId || "（无 orderId）"}\n` +
+        `方向：${side}  注额：${amountUsdt}u`,
+      { tradeId, orderId: record.orderId, side, amountUsdt },
+      { key: `order:unknown:${tradeId}` },
     );
   }
 

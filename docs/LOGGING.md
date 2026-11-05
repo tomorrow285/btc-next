@@ -68,6 +68,10 @@
 | `void` | info | 订单历史确认未成交 | `tradeId` `orderId` `reason` `tries` |
 | `error` | error / warn | 内部错误；主循环步骤兜底也走这里 | `scope` `message` `fatal`（仅启动阶段） |
 | `fatal` | error | 启动阶段失败，进程即将退出 | `message` |
+| `notice_sent` | info | 飞书通知发送成功 | `messageId` `attempts` + 调用方字段 |
+| `notice_failed` | warn / error | 单次发送失败 / 重试耗尽（error） | `attempt` `attempts` `deliveryError` `text` |
+| `notice_suppressed` | info | 同一去重键还在冷却期，本次不发 | `key` `reason` |
+| `notice_dropped` | warn | 通知积压超过上限，丢弃 | `key` `reason` |
 | `board_error` | warn | `pnpm board --watch` 刷新失败 | `message` |
 
 ### 1.2 `order` 事件的子状态

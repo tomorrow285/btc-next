@@ -26,6 +26,8 @@ pnpm live                 # ⚠️ 实盘
 
 pnpm pause "手动暂停"
 pnpm resume
+pnpm notice --check       # 飞书通知自检（只查配置）
+pnpm notice "测试消息"     # 真发一条到飞书
 
 pnpm test
 pnpm typecheck
@@ -49,6 +51,8 @@ pnpm typecheck
 | `pnpm trade orders` | 当前挂单 | ❌ |
 | `pnpm trade settled [N]` | 已结算记录 | ❌ |
 | `pnpm pause [原因]` / `pnpm resume` | 暂停 / 恢复 | ❌ |
+| `pnpm notice [文本]` | 发一条飞书通知（默认是链路自检文案） | ❌ |
+| `pnpm notice --check` | 只检查飞书凭据是否齐全 | ❌ |
 
 ---
 
@@ -91,7 +95,7 @@ src/
 │   ├── tradeLog.ts            data/trades/YYYY-MM-DD_trades.ndjson
 │   ├── reset.ts               账本重新初始化
 │   ├── funding.ts             选择余额最多的支付账户
-│   ├── notify.ts              通知占位函数
+│   ├── notify.ts              用户通知（飞书自建应用直发）
 │   ├── metrics.ts / pause.ts  指标 / 暂停标记
 ├── cli/                       各命令入口
 └── util/
@@ -176,6 +180,45 @@ pnpm live | grep '"tradeId":"123456-1762300800000"'
 
 ---
 
+## 通知（飞书）
+
+执行器把重要事件直接推到飞书会话，不依赖 Hermes 或任何第三方网关。
+
+| 事件 | 时机 | 去重 |
+|---|---|---|
+| ❌ 下单失败 | 下单报错 / 回查终态为 FAILED | 按窗口，不重复 |
+| ⚠️ 下单未确认 | 20s 内拿不到终态（按「可能已成交」处理） | 按窗口，不重复 |
+| 🔄 重新初始化 | 连败 / 欠账触顶，账本清零 | 按重置次数 |
+| ⏸ / ▶️ 暂停 / 恢复 | 主循环发现暂停标记出现 / 消失 | 各一条 |
+| ⚠️ 倍率不足 / 深度不足 | 本轮跳过或可能吃不满 | 30 分钟内同类只发一条 |
+
+配置写在 `.env`（见 [.env.example](.env.example)）：
+
+```bash
+FEISHU_API_BASE=https://open.feishu.cn/open-apis   # Lark 国际版用 open.larksuite.com
+FEISHU_APP_ID=cli_xxxxxxxx
+FEISHU_APP_SECRET=xxxxxxxx
+FEISHU_RECEIVE_ID=oc_xxxxxxxx
+FEISHU_RECEIVE_ID_TYPE=chat_id
+```
+
+设计约束：
+
+- **旁路能力**：发送失败只记 `notice_failed`，不抛错、不阻塞交易；进程退出也不影响已发出的消息；
+- **凭据可选**：三项都不填 → 通知静默，交易与只读命令照常运行；只填一半 → 启动报错；
+- **串行发送**：所有消息走一条队列，避免并发取 token / 触发飞书限流；
+- **去重**：同一 `key` 在 `FEISHU_DEDUPE_MS`（默认 30 分钟）内只发一次，防止每 15 分钟刷同一类跳过原因；
+- token 缓存 2 小时，提前 5 分钟续期，失效码（99991661/99991663/99991664/99991668）自动清缓存重取。
+
+验证链路：
+
+```bash
+pnpm notice --check
+pnpm notice "🔧 测试"
+```
+
+---
+
 ## 关键口径
 
 | 项 | 口径 |
@@ -211,6 +254,8 @@ pnpm live | grep '"tradeId":"123456-1762300800000"'
 | `B0_RESET_LOSS_MULTIPLE` | `128` | 欠账达到 `基础注码 × 该值` 清账 |
 | `SLIPPAGE_BPS` | `200` | 报价滑点容忍 |
 | `DATA_DIR` | `data` | 状态目录 |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_RECEIVE_ID` | 空 | 飞书通知凭据；三项都不填则通知静默 |
+| `FEISHU_DEDUPE_MS` | `1800000` | 同一通知的冷却时间（30 分钟） |
 
 ---
 

@@ -338,12 +338,16 @@ export async function runRound(
       `（报价 ${formatDecimal(gateQuotedMultiple, 4)}）` +
       ` < ${formatDecimal(config.strategy.minEffectiveMultiplier, 4)}，本轮主动跳过`;
     record.reason = reason;
-    notify(reason, {
-      tradeId,
-      marketId: fresh.marketId,
-      side,
-      effectiveMultiple: gateEffective.toFixed(4),
-    });
+    notify(
+      reason,
+      {
+        tradeId,
+        marketId: fresh.marketId,
+        side,
+        effectiveMultiple: gateEffective.toFixed(4),
+      },
+      { key: "skip:MULTIPLE_BELOW_GATE" },
+    );
     return finish(record, state, fresh, "MULTIPLE_BELOW_GATE");
   }
 
@@ -359,13 +363,17 @@ export async function runRound(
       capacityUsdt: plan.capacityUsdt,
       amountUsdt: plan.amountUsdt,
     }, "warn");
-    notify(warning, {
-      tradeId,
-      marketId: fresh.marketId,
-      side,
-      capacityUsdt: plan.capacityUsdt,
-      amountUsdt: plan.amountUsdt,
-    });
+    notify(
+      warning,
+      {
+        tradeId,
+        marketId: fresh.marketId,
+        side,
+        capacityUsdt: plan.capacityUsdt,
+        amountUsdt: plan.amountUsdt,
+      },
+      { key: "warn:DEPTH_SHORTFALL" },
+    );
   }
 
   // 10. 下单

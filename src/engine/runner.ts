@@ -23,6 +23,7 @@ import { errorText, logEvent } from "../util/log.js";
 import { safeAsync, safeSync } from "../util/safe.js";
 import { selectFundingAccount } from "./funding.js";
 import { acquireInstanceLock } from "./instanceLock.js";
+import { notify } from "./notify.js";
 import { readPause } from "./pause.js";
 import { applyResetIfNeeded, MARTINGALE_SETTINGS } from "./reset.js";
 import { runRound, type EngineContext } from "./round.js";
@@ -119,6 +120,11 @@ async function runEngine(): Promise<void> {
     if (pause) {
       if (!paused) {
         logEvent("pause", { reason: pause.reason, at: pause.at }, "warn");
+        notify(
+          `⏸ 已暂停交易\n原因：${pause.reason}\n时间：${new Date(pause.at).toISOString()}`,
+          { scope: "pause", reason: pause.reason, at: pause.at },
+          { key: "pause" },
+        );
         paused = true;
       }
       await sleep(1_000);
@@ -126,6 +132,7 @@ async function runEngine(): Promise<void> {
     }
     if (paused) {
       logEvent("resume", {});
+      notify("▶️ 已恢复交易", { scope: "resume" }, { key: "resume" });
       paused = false;
     }
 
