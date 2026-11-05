@@ -3,12 +3,14 @@
  *
  * 卖一价只代表第一档能吃到的价格，大注会吃穿好几档。这里：
  *   1. 先按基础注码算一次可成交均价（VWAP），作为有效倍率门槛的口径；
- *   2. 再用该均价代入马丁格尔公式推算本轮注额；
+ *   2. 解 **不动点**：注额越大 → 吃穿档位越多 → 可成交均价越高 → 倍率越低 → 需要的注额更大。
+ *      所以在盘口上二分求「让 `赢时收益 ≥ 欠账` 成立的最小注额」，而不是拿基础注码那一档的
+ *      均价一次算完（那样会**系统性偏小**，赢了也补不平）；
  *   3. 最后按注额逐档吃单复核深度。吃不下就标记 `depthShortfall`，
  *      由调用方 warn + notify，但**不拦截下单**（FOK 自己会决定成不成）。
  */
-import { dec, type BigNumber, type DecimalInput } from "../util/decimal.js";
-import { stakeAmount, type Bankroll, type MartingaleSettings } from "./money.js";
+import { dec, maxDecimal, type BigNumber, type DecimalInput } from "../util/decimal.js";
+import { isConservative, stakeAmount, type Bankroll, type MartingaleSettings } from "./money.js";
 
 /** 盘口档位。与 `binance/marketApi.ts` 的 `OrderBookLevel` 结构兼容。 */
 export interface PriceLevel {
@@ -103,7 +105,55 @@ export function vwapForAmount(
 }
 
 /**
+ * 花掉 `amount` 逐档吃单后，**若本局赢**能赚多少：`amount × ((1 − fee) / vwap − 1)`。
+ * 与 `money.pnlFromFill` 的「份数 × 1 − 实扣」同一口径。吃不下（超出容量）返回 null。
+ */
+function winPnlOf(
+  levels: readonly PriceLevel[],
+  amount: BigNumber,
+  feeRate: DecimalInput,
+): BigNumber | null {
+  if (!amount.gt(0)) return dec(0);
+  const vwap = vwapForAmount(levels, amount.toFixed());
+  if (vwap === null) return null;
+  return amount.times(dec(1).minus(feeRate).div(vwap).minus(1));
+}
+
+/**
+ * 在盘口上解「赢时收益 ≥ want」的**最小**注额（不动点）。
+ *
+ * 为什么能二分：每多花 1 USDT 买在 `p < 1 − fee` 的档位上，赢时的边际收益
+ * `(1 − fee)/p − 1 > 0`，所以 `winPnl(A)` 对 A 严格递增。
+ *
+ * 返回 null = 把盘口吃光也补不平，交给调用方按 `depthShortfall` 处理。
+ */
+function solveRecovery(
+  levels: readonly PriceLevel[],
+  want: BigNumber,
+  capacity: BigNumber,
+  feeRate: DecimalInput,
+): BigNumber | null {
+  if (!want.gt(0)) return dec(0);
+  const atCapacity = winPnlOf(levels, capacity, feeRate);
+  if (atCapacity === null || atCapacity.lt(want)) return null;
+
+  let lo = dec(0);
+  let hi = capacity;
+  for (let i = 0; i < 64; i++) {
+    const mid = lo.plus(hi).div(2);
+    const win = winPnlOf(levels, mid, feeRate);
+    if (win === null || win.lt(want)) lo = mid;
+    else hi = mid;
+  }
+  return hi;
+}
+
+/**
  * 用盘口深度推算本轮注额与可成交均价。
+ *
+ * ⚠️ 注额必须按「**这个注额自己**吃出来的均价」解，不能拿基础注码 1u 的均价一次算完：
+ * 大注会吃穿好几档、均价更高、倍率更低，一次算完的注额会系统性偏小，赢了补不平欠账
+ * （2026-11-01 21:15 事故里 113.72u 按 0.76 算、0.9088 成交，补回率只有 35%）。
  *
  * 返回 null 表示连基础注码都接不下（没有可成交档位）。
  * 注额超出容量时返回 `depthShortfall = true`，不返回 null —— 由调用方决定
@@ -122,8 +172,31 @@ export function planStakeByDepth(
   const baseExecPrice = vwapForAmount(levels, basePrice.toFixed());
   if (baseExecPrice === null) return null;
 
-  const quotedMultiple = dec(1).div(baseExecPrice).toFixed();
-  const amount = dec(stakeAmount(bankroll, settings, quotedMultiple));
+  const debt = dec(bankroll.totalLoss);
+  let amount: BigNumber;
+
+  if (!debt.gt(0)) {
+    // 没有欠账：就是基础注码，不需要解不动点。
+    amount = basePrice;
+  } else {
+    const recovery = solveRecovery(levels, debt, capacity, settings.feeRate);
+    if (recovery === null) {
+      // 盘口吃光也补不平：退回「按容量均价估算」的旧口径，给一个偏大的注额，
+      // 交给下面的 depthShortfall 分支（告警 + 仍下单，让 FOK 自己决定成不成）。
+      const vwapCapacity = vwapForAmount(levels, capacity.toFixed()) ?? baseExecPrice;
+      amount = dec(
+        stakeAmount(bankroll, settings, dec(1).div(vwapCapacity).toFixed()),
+      );
+    } else {
+      // 与 money.stakeAmount 同口径：保守模式只补亏，常规模式再加一个基础注码。
+      // 区别只在于 recovery 是按「吃到那么深」的均价解出来的。
+      amount = maxDecimal(
+        isConservative(bankroll, settings) ? recovery : basePrice.plus(recovery),
+        basePrice,
+      );
+    }
+  }
+
   const execPrice = vwapForAmount(levels, amount.toFixed());
 
   if (execPrice === null) {

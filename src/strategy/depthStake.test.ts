@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { dec, type DecimalInput } from "../util/decimal.js";
+import { dec, type BigNumber, type DecimalInput } from "../util/decimal.js";
 import {
   askCapacity,
   planStakeByDepth,
@@ -150,5 +150,60 @@ describe("按深度推算注额", () => {
       settings,
     );
     assert.equal(plan, null);
+  });
+});
+
+/**
+ * 回归：注额必须按「这个注额自己吃出来的均价」解。
+ *
+ * 盘口刻意做成「1u 只吃第一档、50u 已经吃到第二档」：
+ *   0.5 × 2（共 1u）→ 0.6 × 100 → 0.7 × 1000，容量 761u
+ * 旧实现拿「1u 的均价 0.5」一次算出注额 52.08u，但那笔钱实际吃到 0.5977，
+ * 赢了只赚 33.3u —— 补不平 50u 的欠账。新实现解出的注额是 88.6u。
+ */
+describe("注额按自身均价解（2026-11-01 21:15 教训）", () => {
+  const book = levels(["0.5", "2"], ["0.6", "100"], ["0.7", "1000"]);
+
+  const winPnlAt = (asks: readonly PriceLevel[], amount: DecimalInput): BigNumber => {
+    const vwap = vwapForAmount(tradableAsks(asks, settings.feeRate), amount);
+    assert.ok(vwap !== null, `盘口吃不下 ${amount}`);
+    return dec(amount).times(dec(1).minus(settings.feeRate).div(vwap).minus(1));
+  };
+
+  it("保守模式：解出的注额刚好补平欠账，旧口径的注额补不平", () => {
+    const plan = planStakeByDepth(book, { totalLoss: "50", lossStreak: 4 }, settings);
+    assert.ok(plan);
+
+    near(plan.amountUsdt, "88.6", "1e-6");
+    const win = winPnlAt(book, plan.amountUsdt);
+    assert.ok(win.gte(dec(50)), `赢时只能赚 ${win}，补不平 50`);
+    near(win, 50, "1e-6");
+
+    // 旧口径：按 1u 的均价 0.5 一次算完 → 50 / 0.96 = 52.08u
+    const legacyAmount = dec(50).div(dec(1).minus(settings.feeRate));
+    const legacyWin = winPnlAt(book, legacyAmount.toFixed());
+    assert.ok(
+      legacyWin.lt(dec(50)),
+      `旧口径本应补不平，实际却赚了 ${legacyWin}`,
+    );
+    assert.ok(dec(plan.amountUsdt).gt(legacyAmount), "新口径的注额应大于旧口径");
+  });
+
+  it("常规模式：解出的注额同样补得平（另加一个基础注码的利润）", () => {
+    const plan = planStakeByDepth(book, { totalLoss: "5", lossStreak: 0 }, settings);
+    assert.ok(plan);
+
+    near(plan.amountUsdt, "8.3789473684210526", "1e-6");
+    assert.ok(winPnlAt(book, plan.amountUsdt).gte(dec(5)));
+  });
+
+  it("可成交均价与注额自洽", () => {
+    const plan = planStakeByDepth(book, { totalLoss: "50", lossStreak: 4 }, settings);
+    assert.ok(plan);
+    near(
+      plan.execPrice,
+      vwapForAmount(tradableAsks(book, settings.feeRate), plan.amountUsdt) ?? "-1",
+      "1e-9",
+    );
   });
 });
