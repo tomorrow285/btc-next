@@ -92,22 +92,9 @@ export async function runRound(
     }
   };
 
-  // 1. 超时校验
-  if (Date.now() > entryDeadline) {
-    const reason =
-      `错过入场时点（开盘 +${config.timing.entryDelayS}s 起 ` +
-      `${config.timing.entryWindowS}s 内未能入场）`;
-    safeSync(
-      "record_no_bet",
-      () => recordNoBet(window, strategy.id, "ENTRY_MISSED", reason),
-      undefined,
-      fields,
-    );
-    safeSync("mark_handled", () => markHandled(window), undefined, fields);
-    return { window, openRecord: null };
-  }
-
-  // 2. 当前窗口已下单校验（状态 + 未结流水双重防护）
+  // 1. 当前窗口已下单校验（状态 + 未结流水双重防护）
+  //    必须排在超时校验之前：重启落在窗口中间时，这一轮早就下过注了，
+  //    先判超时会把「已下注」误记成「错过入场」，把流水统计弄歪。
   const loaded = safeSync("read_state", () => readState(), null, fields);
   if (!loaded) return { window, openRecord: null };
   let state = loaded;
@@ -149,6 +136,21 @@ export async function runRound(
       );
     }
     return { window, openRecord: existingOpenBet };
+  }
+
+  // 2. 超时校验（本窗口还没下过注，才谈得上「错过入场」）
+  if (Date.now() > entryDeadline) {
+    const reason =
+      `错过入场时点（开盘 +${config.timing.entryDelayS}s 起 ` +
+      `${config.timing.entryWindowS}s 内未能入场）`;
+    safeSync(
+      "record_no_bet",
+      () => recordNoBet(window, strategy.id, "ENTRY_MISSED", reason),
+      undefined,
+      fields,
+    );
+    safeSync("mark_handled", () => markHandled(window), undefined, fields);
+    return { window, openRecord: null };
   }
 
   // 3. 刷新窗口，直到 tradingStatus 为 OPEN 或超过下单时间限制
