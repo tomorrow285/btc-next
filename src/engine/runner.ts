@@ -28,6 +28,7 @@ import { readPause } from "./pause.js";
 import { applyResetIfNeeded, MARTINGALE_SETTINGS } from "./reset.js";
 import { runRound, type EngineContext } from "./round.js";
 import { markHandled, recordNoBet } from "./roundSupport.js";
+import { openTradeForMarket } from "./tradeLog.js";
 import { catchUpOnce } from "./settlement/catchup.js";
 import { settleAfterClose } from "./settlement/panel.js";
 import { syncStateFromTrades } from "./stateSync.js";
@@ -152,32 +153,62 @@ async function runEngine(): Promise<void> {
     const entryDeadline = entryAt + config.timing.entryWindowS * 1000;
 
     // 已经错过当前窗口：等它结束 + 2s，直接进入下一窗。
+    // 但要先排除「本窗口其实已经下过注」——重启落在窗口中间会走到这里，
+    // 不排除就会把已下注的窗口记成「错过入场」，多写一条空单把统计弄歪。
     if (Date.now() > entryDeadline) {
-      const reason =
-        `错过入场时点（开盘 +${config.timing.entryDelayS}s 起 ` +
-        `${config.timing.entryWindowS}s 内未能入场）`;
-      safeSync(
-        "record_missed_bet",
-        () => recordNoBet(window, strategy.id, "ENTRY_MISSED", reason),
-        undefined,
-        { tradeId: tradeIdOf(window) },
-      );
-      safeSync(
-        "mark_handled",
-        () => markHandled(window),
-        undefined,
-        { tradeId: tradeIdOf(window) },
-      );
-      logEvent(
-        "window_missed",
-        {
-          tradeId: tradeIdOf(window),
-          windowStart: window.startMs,
-          windowEnd: window.endMs,
-          waitMs: Math.max(0, window.endMs - Date.now() + 2_000),
+      const alreadyBet = safeSync(
+        "already_bet_lookup",
+        () => {
+          const synced = readState();
+          return (
+            synced.lastBettedWindowStart === window.startMs ||
+            openTradeForMarket(window.marketId) !== null
+          );
         },
-        "warn",
+        false,
+        { tradeId: tradeIdOf(window) },
       );
+
+      if (alreadyBet) {
+        logEvent(
+          "round_skipped",
+          {
+            tradeId: tradeIdOf(window),
+            windowStart: window.startMs,
+            windowEnd: window.endMs,
+            code: "ALREADY_BET",
+            reason: `本窗口已下过注（windowStart=${window.startMs}），跳过`,
+            status: "SKIP",
+          },
+          "warn",
+        );
+      } else {
+        const reason =
+          `错过入场时点（开盘 +${config.timing.entryDelayS}s 起 ` +
+          `${config.timing.entryWindowS}s 内未能入场）`;
+        safeSync(
+          "record_missed_bet",
+          () => recordNoBet(window, strategy.id, "ENTRY_MISSED", reason),
+          undefined,
+          { tradeId: tradeIdOf(window) },
+        );
+        safeSync(
+          "mark_handled",
+          () => markHandled(window),
+          undefined,
+          { tradeId: tradeIdOf(window) },
+        );
+        logEvent(
+          "window_missed",
+          {
+            tradeId: tradeIdOf(window),
+            windowStart: window.startMs,
+            windowEnd: window.endMs,
+            waitMs: Math.max(0, window.endMs - Date.now() + 2_000),
+          },
+          "warn",
+        );
+      }
       const waitMs = window.endMs - Date.now() + 2_000;
       if (waitMs > 0) await sleep(waitMs);
       continue;
