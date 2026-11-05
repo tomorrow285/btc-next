@@ -198,10 +198,15 @@ export const config = {
     entryDelayS,
     /** 超过入场时点这么久就放弃本局。 */
     entryWindowS,
-    /** 收盘后多少秒开始盘面自判（重构后固定为 1s）。 */
-    judgeDelayS: readNumber("JUDGE_DELAY_S", 1),
+    /** 收盘后多少秒开始盘面自判。 */
+    judgeDelayS: readNumber("JUDGE_DELAY_S", 5),
     /** 自判读盘面的重试预算。 */
     judgeBudgetS: readNumber("JUDGE_BUDGET_S", 20),
+    /**
+     * 自判的**硬截止**：最晚等到「盘面结束 + 这么多秒」就放弃，
+     * 超了挂待复核。不论重试预算还剩多少都不再等。
+     */
+    judgeDeadlineS: readNumber("JUDGE_DEADLINE_S", 15),
     /** 入场前留给下单路径的时间。 */
     orderReserveS: readNumber("ORDER_RESERVE_S", 5),
     /** 链上对账单次预算。 */

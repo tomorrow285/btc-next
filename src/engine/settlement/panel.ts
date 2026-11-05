@@ -207,8 +207,11 @@ export async function settleAfterClose(round: {
   }
 
   const nextEntryAt = window.endMs + config.timing.entryDelayS * 1000;
+  // 三个上限取最小：单个窗口的重试预算、**盘面结束 + JUDGE_DEADLINE_S 的硬截止**、
+  // 下一窗口入场前要留出的下单时间。硬截止保证「收盘后不会无限等盘面」。
   const judgeDeadline = Math.min(
     Date.now() + config.timing.judgeBudgetS * 1000,
+    window.endMs + config.timing.judgeDeadlineS * 1000,
     nextEntryAt - config.timing.orderReserveS * 1000,
   );
 
