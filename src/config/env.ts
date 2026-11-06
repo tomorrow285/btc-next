@@ -101,6 +101,14 @@ if (!(minEffectiveMultiplier >= 1)) {
   throw new Error("MIN_EFFECTIVE_MULTIPLIER 必须 >= 1");
 }
 
+/**
+ * 解补亏时假设的成交价滑点（bps，相对盘口均价）。
+ * 实测 46 笔成交：实际均价相对计划均价中位 +196bps、p90 +466bps。
+ * 按 0 算 = 假设总能用盘口价成交 → 注额系统性偏小、赢了补不平欠账。
+ */
+const fillPriceDriftBps = readInteger("FILL_PRICE_DRIFT_BPS", 200);
+assertRange("FILL_PRICE_DRIFT_BPS", fillPriceDriftBps, 0, 5_000);
+
 const bBasePrice = readNumber("B0_BASE_PRICE", 1);
 assertPositive("B0_BASE_PRICE", bBasePrice);
 
@@ -229,6 +237,8 @@ export const config = {
     feeRate,
     /** 有效倍率低于该值就不下单。 */
     minEffectiveMultiplier,
+    /** 解补亏时假设的成交价滑点（bps）。 */
+    fillPriceDriftBps,
 
     /** 策略 B0 专属参数（环境变量 B0_*）。 */
     b0: {

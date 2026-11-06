@@ -206,4 +206,27 @@ describe("注额按自身均价解（2026-11-01 21:15 教训）", () => {
       "1e-9",
     );
   });
+
+  it("滑点假设 200bps：注额放大，按假设成交价算仍补得平", () => {
+    const bankroll = { totalLoss: "50", lossStreak: 4 };
+    const base = planStakeByDepth(book, bankroll, settings);
+    const drifted = planStakeByDepth(book, bankroll, {
+      ...settings,
+      fillPriceDriftBps: 200,
+    });
+    assert.ok(base && drifted);
+
+    assert.ok(
+      dec(drifted.amountUsdt).gt(base.amountUsdt),
+      "带滑点假设的注额应大于按盘口价算的注额",
+    );
+    // assumedFillPrice = 计划成交均价 × 1.02
+    near(drifted.assumedFillPrice, dec(drifted.execPrice).times("1.02").toFixed(), "1e-9");
+
+    // 按「更差」的假设成交价算，赢时收益仍然 >= 欠账
+    const winAtAssumed = dec(drifted.amountUsdt).times(
+      dec(1).minus(settings.feeRate).div(drifted.assumedFillPrice).minus(1),
+    );
+    assert.ok(winAtAssumed.gte(dec(50)), `按假设成交价只能赚 ${winAtAssumed}，补不平 50`);
+  });
 });

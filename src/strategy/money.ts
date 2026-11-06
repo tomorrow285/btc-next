@@ -28,6 +28,11 @@ export interface MartingaleSettings {
   riskCount: number;
   resetLossStreak: number;
   resetLossMultiple: number;
+  /**
+   * 解补亏时假设的成交价滑点（bps，相对盘口均价）。
+   * 盘口快照 → 交易所成交之间实测中位 +196bps，按 0 算会系统性补不平。
+   */
+  fillPriceDriftBps?: number;
 }
 
 export function emptyBankroll(): Bankroll {

@@ -17,6 +17,7 @@ import { readState, writeState, type EngineState } from "./stateStore.js";
 /** B0 的马丁格尔参数（费率是市场级参数，单独拼进来）。 */
 export const MARTINGALE_SETTINGS: MartingaleSettings = {
   feeRate: config.strategy.feeRate,
+  fillPriceDriftBps: config.strategy.fillPriceDriftBps,
   ...config.strategy.b0,
 };
 

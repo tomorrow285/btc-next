@@ -29,6 +29,8 @@ export interface DepthPlan {
   capacityUsdt: string;
   /** 盘口深度接不下计划注额（仍然下单） */
   depthShortfall: boolean;
+  /** 解补亏时假设的成交价（= execPrice × (1 + 滑点假设)），用于日志核对 */
+  assumedFillPrice: string;
 }
 
 const byPriceAsc = (left: PriceLevel, right: PriceLevel): number =>
@@ -105,18 +107,24 @@ export function vwapForAmount(
 }
 
 /**
- * 花掉 `amount` 逐档吃单后，**若本局赢**能赚多少：`amount × ((1 − fee) / vwap − 1)`。
+ * 花掉 `amount` 逐档吃单后，**若本局赢**能赚多少：`amount × ((1 − fee) / fillPrice − 1)`。
  * 与 `money.pnlFromFill` 的「份数 × 1 − 实扣」同一口径。吃不下（超出容量）返回 null。
+ *
+ * `driftBps` 是**成交价相对盘口均价的保守假设**：盘口快照 → 交易所成交之间会滑点，
+ * 实测中位 +196bps（46 笔）。补亏按「好价钱」算会系统性补不平，所以默认按更差的价算收益。
  */
 function winPnlOf(
   levels: readonly PriceLevel[],
   amount: BigNumber,
   feeRate: DecimalInput,
+  driftBps = 0,
 ): BigNumber | null {
   if (!amount.gt(0)) return dec(0);
   const vwap = vwapForAmount(levels, amount.toFixed());
   if (vwap === null) return null;
-  return amount.times(dec(1).minus(feeRate).div(vwap).minus(1));
+  const fillPrice = dec(vwap).times(dec(1).plus(dec(driftBps).div(10_000)));
+  if (!fillPrice.gt(0)) return null;
+  return amount.times(dec(1).minus(feeRate).div(fillPrice).minus(1));
 }
 
 /**
@@ -132,16 +140,17 @@ function solveRecovery(
   want: BigNumber,
   capacity: BigNumber,
   feeRate: DecimalInput,
+  driftBps = 0,
 ): BigNumber | null {
   if (!want.gt(0)) return dec(0);
-  const atCapacity = winPnlOf(levels, capacity, feeRate);
+  const atCapacity = winPnlOf(levels, capacity, feeRate, driftBps);
   if (atCapacity === null || atCapacity.lt(want)) return null;
 
   let lo = dec(0);
   let hi = capacity;
   for (let i = 0; i < 64; i++) {
     const mid = lo.plus(hi).div(2);
-    const win = winPnlOf(levels, mid, feeRate);
+    const win = winPnlOf(levels, mid, feeRate, driftBps);
     if (win === null || win.lt(want)) lo = mid;
     else hi = mid;
   }
@@ -173,13 +182,14 @@ export function planStakeByDepth(
   if (baseExecPrice === null) return null;
 
   const debt = dec(bankroll.totalLoss);
+  const driftBps = settings.fillPriceDriftBps ?? 0;
   let amount: BigNumber;
 
   if (!debt.gt(0)) {
     // 没有欠账：就是基础注码，不需要解不动点。
     amount = basePrice;
   } else {
-    const recovery = solveRecovery(levels, debt, capacity, settings.feeRate);
+    const recovery = solveRecovery(levels, debt, capacity, settings.feeRate, driftBps);
     if (recovery === null) {
       // 盘口吃光也补不平：退回「按容量均价估算」的旧口径，给一个偏大的注额，
       // 交给下面的 depthShortfall 分支（告警 + 仍下单，让 FOK 自己决定成不成）。
@@ -198,6 +208,8 @@ export function planStakeByDepth(
   }
 
   const execPrice = vwapForAmount(levels, amount.toFixed());
+  const assumedFill = (price: string): string =>
+    dec(price).times(dec(1).plus(dec(driftBps).div(10_000))).toFixed();
 
   if (execPrice === null) {
     const execAtCapacity =
@@ -208,6 +220,7 @@ export function planStakeByDepth(
       baseExecPrice,
       capacityUsdt: capacity.toFixed(),
       depthShortfall: true,
+      assumedFillPrice: assumedFill(execAtCapacity),
     };
   }
 
@@ -217,5 +230,6 @@ export function planStakeByDepth(
     baseExecPrice,
     capacityUsdt: capacity.toFixed(),
     depthShortfall: false,
+    assumedFillPrice: assumedFill(execPrice),
   };
 }

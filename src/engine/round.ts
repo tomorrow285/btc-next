@@ -330,6 +330,7 @@ export async function runRound(
     amountUsdt: plan.amountUsdt,
     capacityUsdt: plan.capacityUsdt,
     depthShortfall: plan.depthShortfall,
+    assumedFillPrice: plan.assumedFillPrice,
     totalLoss: state.bankroll.totalLoss,
     lossStreak: state.bankroll.lossStreak,
   });
